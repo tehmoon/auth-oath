@@ -37,14 +37,6 @@ Authorize clients -- `openvpn`:
 username=blih password=12345678 ./auth-oath -socket /tmp/blih.sock
 ```
 
-### Generate a secret:
-
-To generate a secret -- `github.com/tehmoon/cryptocli`:
-
-```
-cryptocli dgst -in rand: -filters-in byte-counter:stop-at=1m -encoders base32 -filters-cmd-out byte-counter:stop-at=12 sha512
-```
-
 Then copy this into your totp software and select 8 digits/sha512.
 
 
@@ -71,6 +63,16 @@ Usage of ./auth-oath:
   -socket string
     	Path to the socket file
 ```
+
+### Todo:
+
+server:
+- CRUD user endpoint
+- remove base32
+
+client:
+- CRUD user API
+- qrencode display
 
 ### Future:
 
