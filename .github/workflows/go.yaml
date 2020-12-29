@@ -1,0 +1,31 @@
+name: Go
+on:
+    pull_request:
+      types: [synchronize, review_requested, edited, opened]    
+    push:
+      branches:
+        - "master"
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-go@v2
+      with:
+        go-version: '^1.15.6' # The Go version to download (if necessary) and use.
+    - run: |
+        set -euxfo pipefail
+        for dir in auth-oath auth-oathd
+        do (
+          cd "${dir}"
+          set +e; go get -v ./...; set -e
+          go build .
+        ) done
+        mkdir -pv artifacts/linux-x86_64
+        mv auth-oath/auth-oath auth-oathd/auth-oathd artifacts/linux-x86_64
+    - name: upload
+      uses: actions/upload-artifact@master
+      with:
+        name: artifacts
+        path: artifacts

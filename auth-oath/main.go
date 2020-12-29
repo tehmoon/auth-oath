@@ -96,7 +96,7 @@ func start(username, password, f string) (error) {
 	}
 
 	if ! message.Ok {
-		return errors.New("Non authorized")
+		return errors.New("Not authorized")
 	}
 
 	return nil

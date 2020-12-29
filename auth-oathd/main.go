@@ -23,7 +23,11 @@ type User struct {
 	pin string `json:"-"`
 }
 
-func (u *User) Authorize(password string) (bool) {
+type OathFlags struct {
+	Base32 bool
+}
+
+func (u *User) Authorize(password string, flags *OathFlags) (bool) {
 	now := time.Now()
 
 	if password == u.pin {
@@ -33,7 +37,7 @@ func (u *User) Authorize(password string) (bool) {
 		}
 	}
 
-	ok := authorize(u.Key, password, now)
+	ok := authorize(u.Key, password, now, flags)
 	if ! ok {
 		log.Printf("[-] User %q wrong password", u.Name)
 		return false
@@ -47,12 +51,12 @@ func (u *User) Authorize(password string) (bool) {
 
 type Users []*User
 
-func (uu Users) Authorize(message *IngoingMessage) (bool) {
+func (uu Users) Authorize(message *IngoingMessage, flags *OathFlags) (bool) {
 	for _, u := range uu {
 		if u.Name == message.Name {
 			log.Printf("[+] Found user %q in database", message.Name)
 
-			ok := u.Authorize(message.Password)
+			ok := u.Authorize(message.Password, flags)
 			if ok {
 				log.Printf("[+] Authorizing user %q in database", message.Name)
 				return true
@@ -67,7 +71,7 @@ func (uu Users) Authorize(message *IngoingMessage) (bool) {
 	return false
 }
 
-func authorize(key, password string, now time.Time) (bool) {
+func authorize(key, password string, now time.Time, flags *OathFlags) (bool) {
 	if password == "" {
 		log.Printf("[-] Password is empty")
 		return false
@@ -75,7 +79,16 @@ func authorize(key, password string, now time.Time) (bool) {
 
 	time := now.UTC().Format(time.RFC3339)
 
-	command := []string{"oathtool", "--totp=sha512", "-b", "-d", "8", "-N", time, key, password,}
+	command := []string{"oathtool",}
+	command = append(command, "--totp=sha512")
+
+	// Flags should go to the database so it's user specific
+	if flags.Base32 {
+		command = append(command, "-b")
+	}
+
+	command = append(command, []string{"-d", "8", "-N", time, key, password,}...)
+
 	cmd := exec.Command(command[0], command[1:]...)
 
 	output, err := cmd.CombinedOutput()
@@ -92,6 +105,7 @@ var (
 	FlagSocketPath string
 	FlagSocketUser string
 	FlagSocketGroup string
+	FlagBase32 bool
 	ErrBadFlag error = errors.New("Error bad flag")
 )
 
@@ -100,6 +114,7 @@ func init() {
 	flag.StringVar(&FlagSocketPath, "socket", "", "Path to the socket file")
 	flag.StringVar(&FlagSocketUser, "user", "", "Set user name on the socket file")
 	flag.StringVar(&FlagSocketGroup, "group", "", "Set group name on the socket file")
+	flag.BoolVar(&FlagBase32, "base32", false, "Use base32 instead of hex")
 
 	flag.Parse()
 }
@@ -119,6 +134,10 @@ func main() {
 		os.Exit(2)
 	}
 
+	flags := &OathFlags{
+		Base32: FlagBase32,
+	}
+
 	u, g, err := checkUserGroup(FlagSocketUser, FlagSocketGroup)
 	if err != nil {
 		err = errors.Wrap(err,  "Error in -user or -group flag")
@@ -136,7 +155,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	err = start(users, u, g, FlagSocketPath)
+	err = start(users, u, g, FlagSocketPath, flags)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 
@@ -193,7 +212,7 @@ func removeFile(f string) (error) {
 	return os.Remove(f)
 }
 
-func start(users Users, u, g int, f string) (error) {
+func start(users Users, u, g int, f string, flags *OathFlags) (error) {
 	l, err := listenUnix(u, g, f)
 	if err != nil {
 		return errors.Wrapf(err, "Error listening on socket %q", f)
@@ -217,7 +236,7 @@ func start(users Users, u, g int, f string) (error) {
 
 				log.Printf("[+] New connection\n")
 
-				processAccept(au.UnixConn, users)
+				processAccept(au.UnixConn, users, flags)
 
 				log.Printf("[-] Connection closed\n")
 		}
@@ -235,7 +254,7 @@ type OutgoingMessage struct {
 	Ok bool `json:"ok"`
 }
 
-func processAccept(unix *net.UnixConn, users Users) {
+func processAccept(unix *net.UnixConn, users Users, flags *OathFlags) {
 	defer unix.Close()
 
 	payload, err := ioutil.ReadAll(unix)
@@ -252,7 +271,7 @@ func processAccept(unix *net.UnixConn, users Users) {
 		return
 	}
 
-	ok := users.Authorize(message)
+	ok := users.Authorize(message, flags)
 	if ok {
 		payload, err = json.Marshal(&OutgoingMessage{Ok: true,})
 		if err != nil {
